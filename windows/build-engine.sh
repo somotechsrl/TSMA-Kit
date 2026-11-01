@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Run inside Cygwin x86_64, with the official JACK2 Windows SDK installed.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+root="$PWD"
+mkdir -p .cache-build/windows/sources dist/windows/engine
+cd .cache-build/windows
+curl -fL --retry 3 https://github.com/radarsat1/liblo/releases/download/0.36/liblo-0.36.tar.gz -o sources/liblo-0.36.tar.gz
+tar xf sources/liblo-0.36.tar.gz
+(cd liblo-0.36; ./configure --disable-shared --disable-tools --disable-examples; make -j2; make install)
+curl -fL --retry 3 https://github.com/essej/sooperlooper/archive/92515b21cba27b7db29b06d3afc8396c43a031d4.tar.gz -o sources/sooperlooper-1.7.9.tar.gz
+tar xf sources/sooperlooper-1.7.9.tar.gz
+jackdll=$(find /cygdrive/c/Windows /cygdrive/c/Program\ Files /cygdrive/c/Program\ Files\ \(x86\) -name libjack64.dll -print -quit 2>/dev/null || true)
+jackheader=$(find /cygdrive/c/Program\ Files /cygdrive/c/Program\ Files\ \(x86\) -path '*/jack/jack.h' -print -quit 2>/dev/null || true)
+test -n "$jackdll" && test -n "$jackheader"
+cp "$jackdll" /usr/local/lib/libjack64.dll
+cp -r "$(dirname "$jackheader")" /usr/local/include/
+mkdir -p /usr/local/lib/pkgconfig
+cat > /usr/local/lib/pkgconfig/jack.pc <<'EOF'
+prefix=/usr/local
+Name: jack
+Description: Native Windows JACK client library
+Version: 1.9.22
+Libs: -L${prefix}/lib -ljack64
+Cflags: -I${prefix}/include
+EOF
+export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+cd sooperlooper-92515b21cba27b7db29b06d3afc8396c43a031d4
+./autogen.sh
+./configure --without-gui CXXFLAGS='-O2 -std=gnu++11' ac_cv_lib_jack_jack_client_open=yes
+make -j2
+make install
+cp /usr/local/bin/sooperlooper.exe "$root/dist/windows/engine/"
+# cygcheck follows the full dependency closure. Do not redistribute Windows DLLs.
+cygcheck /usr/local/bin/sooperlooper.exe > "$root/dist/windows/dependencies.txt"
+while IFS= read -r dll; do
+  dll=$(printf '%s' "$dll" | sed 's/^[[:space:]]*//;s/\r$//')
+  case "$dll" in
+    *\\cygwin\\bin\\*.dll|*\\cygwin64\\bin\\*.dll) cp "$(cygpath -u "$dll")" "$root/dist/windows/engine/" ;;
+  esac
+done < "$root/dist/windows/dependencies.txt"
+cp /bin/cygwin1.dll "$root/dist/windows/engine/"
+cp COPYING "$root/dist/windows/SOOPERLOOPER-COPYING.txt"
+cp "$root/windows/build-engine.sh" "$root/.cache-build/windows/sources/"
+echo 'Headless SooperLooper engine built.'

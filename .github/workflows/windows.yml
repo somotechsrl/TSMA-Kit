@@ -1,0 +1,47 @@
+name: Windows experimental MSI
+on:
+  push:
+    branches: [windows-preview]
+    paths: [windows/**, .github/workflows/windows.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-preview
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install official JACK2 SDK
+        shell: powershell
+        run: |
+          Invoke-WebRequest https://github.com/jackaudio/jack2-releases/releases/download/v1.9.22/jack2-win64-v1.9.22.exe -OutFile "$env:TEMP\jack.exe"
+          $p = Start-Process "$env:TEMP\jack.exe" -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "JACK installer failed: $($p.ExitCode)" }
+      - uses: cygwin/cygwin-install-action@v7
+        with:
+          install-dir: C:\cygwin
+          add-to-path: false
+          packages: >-
+            gcc-g++ make autoconf automake libtool pkg-config gettext-devel
+            curl patch git libsigc2.0-devel libsndfile-devel libsamplerate-devel
+            libxml2-devel libfftw3-devel libncurses-devel
+      - name: Build the real SooperLooper engine
+        shell: powershell
+        run: |
+          & C:\cygwin\bin\bash.exe -l -c "cd `$(cygpath -u '$env:GITHUB_WORKSPACE'); bash windows/build-engine.sh"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-engine-build
+          path: |
+            dist/windows/
+            .cache-build/windows/sooperlooper-*/config.log
+          if-no-files-found: ignore
