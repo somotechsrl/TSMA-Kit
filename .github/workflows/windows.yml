@@ -1,11 +1,11 @@
 name: Windows experimental MSI
 on:
   push:
-    branches: [windows-preview]
+    branches: [main, windows-preview]
     paths: [windows/**, .github/workflows/windows.yml, .gitattributes]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: windows-preview
   cancel-in-progress: false
@@ -37,11 +37,65 @@ jobs:
         run: |
           & C:\cygwin\bin\bash.exe -l -c "cd `$(cygpath -u '$env:GITHUB_WORKSPACE'); bash windows/build-engine.sh"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Exercise native JACK and SooperLooper over OSC
+        run: |
+          python -m unittest discover -s windows -p 'test_*.py' -v
+          python windows/smoke-engine.py
+      - name: Freeze the application and build the x64 MSI
+        shell: powershell
+        run: |
+          python -m pip install pyinstaller==6.16.0
+          python windows/build-msi.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, check the application and shortcuts, then uninstall
+        shell: powershell
+        run: |
+          $msi = Get-ChildItem dist/windows/*.msi | Select-Object -First 1
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v `"$env:TEMP\tsma-install.log`"" -Wait -PassThru
+          if ($p.ExitCode -notin 0,3010) { Get-Content "$env:TEMP\tsma-install.log" -Tail 80; throw "MSI install failed: $($p.ExitCode)" }
+          $app = "$env:ProgramFiles\TSMA Kit\TSMA-Kit.exe"
+          Remove-Item "$env:LOCALAPPDATA\TSMA-Kit\self-test.ok" -ErrorAction SilentlyContinue
+          $p = Start-Process $app -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0 -or !(Test-Path "$env:LOCALAPPDATA\TSMA-Kit\self-test.ok")) { throw 'Installed application self-test failed' }
+          $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+          if (!(Test-Path "$desktop\TSMA Kit.lnk")) { throw 'Desktop shortcut missing' }
+          $menu = [Environment]::GetFolderPath('CommonPrograms')
+          if (!(Test-Path "$menu\TSMA Kit\TSMA Kit.lnk")) { throw 'Start menu shortcut missing' }
+          $p = Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
+          if ($p.ExitCode -notin 0,3010) { throw 'MSI uninstall failed' }
+          if (Test-Path $app) { throw 'Installed executable remains after uninstall' }
+      - name: Collect corresponding runtime sources and checksums
+        shell: powershell
+        run: |
+          python windows/collect-sources.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem dist/windows/*.msi,dist/windows/*sources.tar.gz | ForEach-Object {
+            $hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content dist/windows/WINDOWS-SHA256SUMS -Encoding ascii
+      - name: Publish the experimental Windows installer
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION).Trim()
+          $tag = "v$version-windows-preview.1"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --target $env:GITHUB_SHA --title "TSMA Kit $version — Windows experimental preview" --prerelease --latest=false --notes "Experimental Windows 10/11 x64 MSI. Includes the native performance container and a Cygwin-built headless SooperLooper engine. Automated Windows Server 2022 tests cover real JACK dummy-audio OSC controls, MSI install/uninstall and shortcuts. No physical Windows audio/MIDI or Windows 10/11 desktop has been tested. Requires separate official JACK2/JackRouter, ToneLib GFX and loopMIDI setup; see windows/README.md. No ToneLib registration or personal audio is included."
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag dist/windows/*.msi dist/windows/*sources.tar.gz dist/windows/WINDOWS-SHA256SUMS --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-engine-build
+          name: windows-preview-build
           path: |
-            dist/windows/
+            dist/windows/*.msi
+            dist/windows/*sources.tar.gz
+            dist/windows/WINDOWS-SHA256SUMS
+            dist/windows/dependencies.txt
             .cache-build/windows/sooperlooper-*/config.log
           if-no-files-found: ignore
