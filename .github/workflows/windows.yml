@@ -2,7 +2,7 @@ name: Windows experimental MSI
 on:
   push:
     branches: [windows-preview]
-    paths: [windows/**, .github/workflows/windows.yml]
+    paths: [windows/**, .github/workflows/windows.yml, .gitattributes]
   workflow_dispatch:
 permissions:
   contents: read
