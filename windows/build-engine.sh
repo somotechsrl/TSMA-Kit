@@ -8,7 +8,7 @@ cd .cache-build/windows
 curl -fL --retry 3 https://github.com/radarsat1/liblo/releases/download/0.36/liblo-0.36.tar.gz -o sources/liblo-0.36.tar.gz
 echo 'c08d14832e8dcf8f06840405824a4f9611a0cb3daed0198946326c740941c8b6  sources/liblo-0.36.tar.gz' | sha256sum -c -
 tar xf sources/liblo-0.36.tar.gz
-(cd liblo-0.36; ./configure --disable-shared --disable-tools --disable-examples; make -j2; make install)
+(cd liblo-0.36; ./configure --disable-shared --disable-tools --disable-examples --disable-doc; make -j2; make install)
 curl -fL --retry 3 https://github.com/essej/sooperlooper/archive/92515b21cba27b7db29b06d3afc8396c43a031d4.tar.gz -o sources/sooperlooper-1.7.9.tar.gz
 echo '9ebab985f34ea12de76bf9e66d769866c97d6db33620698e490ab73679f4722f  sources/sooperlooper-1.7.9.tar.gz' | sha256sum -c -
 tar xf sources/sooperlooper-1.7.9.tar.gz
